@@ -1,5 +1,6 @@
 import json
 
+import httpx
 import pytest
 from fastmcp import Client
 from fastmcp.exceptions import ToolError
@@ -67,11 +68,24 @@ async def test_get_job_reads_html_as_text_and_orders_stages(call, recruitee):
 
 async def test_list_pipeline_groups_candidates_by_stage(call, recruitee):
     recruitee.routes[("GET", "/offers/10")] = OFFER
+    # Shape seen on a live company: placements grouped under their stage.
     recruitee.routes[("GET", "/offers/10/placements")] = {
-        "placements": [
-            {"id": 50, "candidate_id": 5, "stage_id": 1, "candidate": {"name": "Joost"}},
-            {"id": 51, "candidate_id": 6, "stage_id": 2, "candidate": {"name": "Eva"}, "overdue_at": "2026-10-20"},
-            {"id": 52, "candidate_id": 7, "stage_id": 2, "candidate": {"name": "Kim"}},
+        "stages": [
+            {"id": 1, "placements": [{"id": 50, "candidate_id": 5, "stage_id": 1, "candidate": {"name": "Joost"}}]},
+            {
+                "id": 2,
+                "placements": [
+                    {
+                        "id": 51,
+                        "candidate_id": 6,
+                        "stage_id": 2,
+                        "candidate": {"name": "Eva"},
+                        "overdue_at": "2026-10-20",
+                    },
+                    {"id": 52, "candidate_id": 7, "stage_id": 2, "candidate": {"name": "Kim"}},
+                ],
+            },
+            {"id": 3, "placements": []},
         ]
     }
 
@@ -90,11 +104,15 @@ async def test_list_pipeline_groups_candidates_by_stage(call, recruitee):
 
 async def test_list_pipeline_filters_one_stage_by_name(call, recruitee):
     recruitee.routes[("GET", "/offers/10")] = OFFER
-    recruitee.routes[("GET", "/offers/10/placements")] = {"placements": []}
+    # With stage_id the placements come back flat, not grouped per stage.
+    recruitee.routes[("GET", "/offers/10/placements")] = {
+        "placements": [{"id": 51, "candidate_id": 6, "stage_id": 2, "candidate": {"name": "Eva"}}]
+    }
 
     result = await call("list_pipeline", {"job_id": 10, "stage": "interview"})
 
     assert [s["name"] for s in result["stages"]] == ["Interview"]
+    assert result["stages"][0]["count"] == 1
     assert recruitee.sent("GET", "/offers/10/placements").url.params["stage_id"] == "2"
 
 
@@ -224,11 +242,12 @@ async def test_disqualify_candidate_resolves_the_reason(call, recruitee):
 async def test_add_note_sends_rich_text(call, recruitee):
     recruitee.routes[("POST", "/candidates/5/notes")] = {"note": {"id": 70, "created_at": "2026-10-25T10:00:00Z"}}
 
-    result = await call("add_note", {"candidate_id": 5, "text": "Strong on SQL", "job_id": 10})
+    result = await call("add_note", {"candidate_id": 5, "text": "Strong on SQL"})
 
-    note = recruitee.body("POST", "/candidates/5/notes")["note"]
-    assert note["body_json"]["doc"]["content"][0]["content"][0]["text"] == "Strong on SQL"
-    assert note["offer_id"] == 10
+    body = recruitee.body("POST", "/candidates/5/notes")
+    assert body["note"]["body_json"]["doc"]["content"][0]["content"][0]["text"] == "Strong on SQL"
+    # Seen live: a top-level offer_id would make this a note on the job instead of the candidate.
+    assert "offer_id" not in body
     assert result == {"note_id": 70, "created_at": "2026-10-25T10:00:00Z"}
 
 
@@ -259,7 +278,13 @@ async def test_evaluations_combine_scorecards_and_summary(call, recruitee):
         "meta": {"counters": {"pending": 1}},
         "interview_results": [
             {"id": 3, "admin_id": 7, "offer_id": 10, "rating": 4, "interview_template_name": "Tech",
-             "rating_note": "Good"},
+             "rating_note": "<p>Good</p>",
+             "interview_result_answers": [
+                 {"question_kind": "info", "question_hint": "<p>Part 1</p>"},
+                 {"question_kind": "text", "question_title": "Why us?", "content": "Growth"},
+                 {"question_kind": "rating", "question_title": "Skills",
+                  "scores": [{"position": 0, "title": "Python", "score": 4, "note_html": None}]},
+             ]},
             {"id": 4, "admin_id": 7, "offer_id": 11, "rating": 2},
         ],
     }  # fmt: skip
@@ -270,7 +295,18 @@ async def test_evaluations_combine_scorecards_and_summary(call, recruitee):
     result = await call("get_candidate_evaluations", {"candidate_id": 5, "job_id": 10})
 
     assert result["evaluations"] == [
-        {"id": 3, "form": "Tech", "reviewer": "Sanne de Vries", "job_id": 10, "rating": 4, "note": "Good"}
+        {
+            "id": 3,
+            "form": "Tech",
+            "reviewer": "Sanne de Vries",
+            "job_id": 10,
+            "rating": 4,
+            "note": "Good",
+            "answers": [
+                {"question": "Why us?", "answer": "Growth"},
+                {"question": "Skills", "scores": [{"title": "Python", "score": 4}]},
+            ],
+        }
     ]
     assert result["summary"] == {"score": 80, "reviewers_count": 1}
     assert result["pending_requests"] == 1
@@ -286,7 +322,8 @@ async def test_create_task_adds_the_timezone_to_a_due_date(call, recruitee):
             "title": "Call",
             "candidate_id": 5,
             "admin_ids": [7],
-            "due_date": "2026-10-30",
+            # A bare date is rejected live, and an offset-less time is read as UTC.
+            "due_date": "2026-10-30T17:00:00+01:00",
             "timezone": "Europe/Amsterdam",
         }
     }
@@ -341,3 +378,107 @@ async def test_list_reference_data_filters_by_name(call, recruitee):
     result = await call("list_reference_data", {"kind": "disqualify_reasons", "query": "fit"})
 
     assert result == {"disqualify_reasons": [{"id": 1, "name": "Not a fit"}]}
+
+
+async def test_email_thread_keeps_one_copy_of_each_message(call, recruitee):
+    # Shape seen on a live company: the body comes in several HTML variants.
+    body = "<div>See you Monday.</div>"
+    recruitee.routes[("GET", "/mailbox/threads/9")] = {
+        "thread": {
+            "id": 9,
+            "offer_id": 10,
+            "messages": [
+                {"id": "1", "timestamp": "2026-11-13T09:00:00Z", "triggered": False,
+                 "from": [{"name": "Sanne", "email": "sanne@example.com", "admin_id": 7}],
+                 "to": [{"name": "Eva", "email": "eva@example.com", "candidate_id": 6}],
+                 "safe_html": body, "safe_stripped_html": body, "stripped_html": body, "stripped": None},
+            ],
+        },
+        "references": [],
+    }  # fmt: skip
+
+    result = await call("get_email_thread", {"thread_id": 9})
+
+    assert result == {
+        "id": 9,
+        "offer_id": 10,
+        "messages": [
+            {
+                "id": "1",
+                "sent_at": "2026-11-13T09:00:00Z",
+                "from": [{"name": "Sanne", "email": "sanne@example.com"}],
+                "to": [{"name": "Eva", "email": "eva@example.com"}],
+                "text": "See you Monday.",
+            }
+        ],
+    }
+
+
+async def test_filter_candidates_reads_nested_offer_and_stage(call, recruitee):
+    # Shape seen on a live company: search hits nest the offer and stage in each placement.
+    recruitee.routes[("GET", "/search/new/candidates")] = {
+        "total": 1,
+        "hits": [
+            {"id": 5, "name": "Eva", "placements": [
+                {"id": 50, "stage": {"id": 2, "name": "Interview"},
+                 "offer": {"id": 10, "kind": "job", "title": "Backend Engineer"}},
+                {"id": 51, "stage": None, "offer": {"id": 20, "kind": "talent_pool", "title": "Rising stars"}},
+            ]},
+        ],
+    }  # fmt: skip
+
+    result = await call("filter_candidates", {"skills": ["Python"]})
+
+    assert result["candidates"][0]["placements"] == [
+        {"placement_id": 50, "stage": "Interview", "offer_id": 10, "job": "Backend Engineer"},
+        {"placement_id": 51, "talent_pool_id": 20, "talent_pool": "Rising stars"},
+    ]
+
+
+def one_line_pdf(line: str) -> bytes:
+    """A minimal one-page PDF with a text layer."""
+    content = f"BT /F1 12 Tf 72 720 Td ({line}) Tj ET".encode()
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R"
+        b" /Resources << /Font << /F1 5 0 R >> >> >>",
+        b"<< /Length %d >>\nstream\n%s\nendstream" % (len(content), content),
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ]
+    pdf, offsets = b"%PDF-1.4\n", []
+    for number, body in enumerate(objects, 1):
+        offsets.append(len(pdf))
+        pdf += b"%d 0 obj\n%s\nendobj\n" % (number, body)
+    xref = len(pdf)
+    pdf += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objects) + 1)
+    pdf += b"".join(b"%010d 00000 n \n" % offset for offset in offsets)
+    return pdf + b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (len(objects) + 1, xref)
+
+
+async def test_cv_text_falls_back_to_the_pdf_without_sending_the_token(call, recruitee):
+    # Seen live: cv_text is often null, while cv_url is a pre-signed link to a PDF version of the CV.
+    recruitee.routes[("GET", "/candidates/5/parsed_cv")] = {
+        "data": {"cv_text": None, "cv_url": "https://storage.example/cv.pdf?X-Amz-Signature=abc"}
+    }
+    recruitee.routes[("GET", "/cv.pdf")] = lambda request: httpx.Response(
+        200, content=one_line_pdf("Eva, Python developer")
+    )
+
+    result = await call("get_candidate_cv", {"candidate_id": 5})
+
+    assert result == {"cv_text": "Eva, Python developer"}
+    download = recruitee.requests[-1]
+    assert download.url.host == "storage.example"
+    assert "authorization" not in download.headers
+
+
+async def test_cv_without_a_text_layer_returns_the_link(call, recruitee):
+    recruitee.routes[("GET", "/candidates/5/parsed_cv")] = {"data": {"cv_url": "https://storage.example/scan.pdf"}}
+    recruitee.routes[("GET", "/scan.pdf")] = lambda request: httpx.Response(200, content=b"%PDF-1.4 scanned image")
+
+    result = await call("get_candidate_cv", {"candidate_id": 5})
+
+    assert result["cv_url"] == "https://storage.example/scan.pdf"
+    assert "scan" in result["note"]
+    assert "cv_text" not in result

@@ -1,3 +1,4 @@
+import asyncio
 import json
 from datetime import date
 from typing import Annotated, Any, Literal
@@ -5,6 +6,7 @@ from typing import Annotated, Any, Literal
 from pydantic import Field
 
 from .. import shape
+from ..client import RecruiteeError
 from .common import CandidateId, Limit, Page, ids_for
 
 CV_TEXT_LIMIT = 20_000
@@ -159,6 +161,13 @@ def register(tool, get_client) -> None:
         client = await get_client()
         data = (await client.get(f"/candidates/{candidate_id}/parsed_cv")).get("data") or {}
         cv_text = data.get("cv_text") or ""
+        if not cv_text and data.get("cv_url"):
+            # Seen live: Recruitee often leaves cv_text empty, but cv_url is always a PDF version of
+            # the CV (Word files included), so read its text layer ourselves.
+            try:
+                cv_text = await asyncio.to_thread(shape.pdf_text, await client.download(data["cv_url"]))
+            except RecruiteeError:
+                pass  # Fall through to the note and the link below.
         return shape.compact(
             {
                 "cv_text": cv_text[:CV_TEXT_LIMIT],
@@ -166,7 +175,15 @@ def register(tool, get_client) -> None:
                 "cover_letter": shape.text(data.get("cover_letter")) or data.get("cover_letter"),
                 "has_cover_letter_file": data.get("has_cover_letter") and not data.get("cover_letter") or None,
                 "cv_parse_status": data.get("cv_parse_status"),
-                "note": None if cv_text else "No CV text: the candidate has no CV, or it was not parsed.",
+                # A signed link, valid about 10 hours, for a person to open the CV themselves.
+                "cv_url": None if cv_text else data.get("cv_url"),
+                "note": None
+                if cv_text
+                else (
+                    "No CV text: the CV is probably a scan without a text layer. Open cv_url to read it."
+                    if data.get("cv_url")
+                    else "No CV text: the candidate has no CV."
+                ),
             }
         )
 
@@ -207,7 +224,12 @@ def register(tool, get_client) -> None:
                 "candidate_id": created["id"],
                 "name": created.get("name"),
                 "adminapp_url": created.get("adminapp_url"),
-                "possible_duplicates": created.get("duplicates"),
+                # Seen live: Recruitee lists the new candidate among its own duplicates.
+                "possible_duplicates": [
+                    d
+                    for d in created.get("duplicates") or []
+                    if (d.get("id") if isinstance(d, dict) else d) != created["id"]
+                ],
             }
         )
 
@@ -215,14 +237,14 @@ def register(tool, get_client) -> None:
     async def update_candidate(
         candidate_id: CandidateId,
         name: str | None = None,
-        title: Annotated[str | None, Field(description="Current job title / headline.")] = None,
         emails: Annotated[list[str] | None, Field(description="Replaces the whole email list.")] = None,
         phones: Annotated[list[str] | None, Field(description="Replaces the whole phone list.")] = None,
     ) -> dict:
-        """Change a candidate's name, headline, emails or phone numbers. Fields left out stay as they are."""
-        changes = shape.compact({"name": name, "title": title, "emails": emails, "phones": phones})
+        """Change a candidate's name, emails or phone numbers. Fields left out stay as they are."""
+        # ponytail: no title/headline; Recruitee answers 422 "Title is invalid" to any value (seen live).
+        changes = shape.compact({"name": name, "emails": emails, "phones": phones})
         if not changes:
-            raise ValueError("Nothing to change: pass at least one of name, title, emails or phones.")
+            raise ValueError("Nothing to change: pass at least one of name, emails or phones.")
         client = await get_client()
         data = await client.patch(f"/candidates/{candidate_id}", {"candidate": changes})
         return shape.pick(data["candidate"], ["id", "name", "title", "emails", "phones", "updated_at"])

@@ -90,7 +90,6 @@ def register(tool, get_client) -> None:
     async def add_note(
         candidate_id: CandidateId,
         text: Annotated[str, Field(min_length=1, description="The note. Line breaks become paragraphs.")],
-        job_id: Annotated[int | None, Field(description="File the note under this job.")] = None,
     ) -> dict:
         """Add a note to a candidate's profile, visible to everyone on the team with access."""
         client = await get_client()
@@ -98,22 +97,23 @@ def register(tool, get_client) -> None:
             "body_json": shape.doc(text),
             "visibility": {"level": "public", "admin_ids": [], "role_ids": []},
         }
-        if job_id:
-            note["offer_id"] = job_id
+        # ponytail: no job_id. Seen live: offer_id inside `note` is ignored, and at the top level it
+        # turns the note into a note on the job, detached from the candidate.
         data = await client.post(f"/candidates/{candidate_id}/notes", {"note": note})
         created = data.get("note") or {}
         return shape.compact({"note_id": created.get("id"), "created_at": created.get("created_at")})
 
     @tool(writes=True, idempotent=True)
     async def tag_candidate(candidate_id: CandidateId, tags: Tags) -> dict:
-        """Add tags to a candidate. Returns all of their tags."""
+        """Add tags to a candidate. Returns the tags added; get_candidate shows all of them."""
         client = await get_client()
+        # Seen live: the response echoes only the tags in the request, not the candidate's full set.
         data = await client.post(f"/candidates/{candidate_id}/tags", {"tags": tags})
-        return {"candidate_id": candidate_id, "tags": shape.tag_names(data.get("tags"))}
+        return {"candidate_id": candidate_id, "added": shape.tag_names(data.get("tags"))}
 
     @tool(writes=True, destructive=True, idempotent=True)
     async def untag_candidate(candidate_id: CandidateId, tags: Tags) -> dict:
-        """Remove tags from a candidate. Returns the tags they still have."""
+        """Remove tags from a candidate. Returns the tags removed; get_candidate shows the rest."""
         client = await get_client()
         data = await client.delete(f"/candidates/{candidate_id}/tags", {"tags": tags})
-        return {"candidate_id": candidate_id, "tags": shape.tag_names(data.get("tags"))}
+        return {"candidate_id": candidate_id, "removed": shape.tag_names(data.get("tags"))}

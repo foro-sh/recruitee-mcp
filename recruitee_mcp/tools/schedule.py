@@ -1,5 +1,6 @@
-from datetime import date, datetime
+from datetime import date, datetime, time
 from typing import Annotated, Literal
+from zoneinfo import ZoneInfo
 
 from pydantic import Field
 
@@ -81,7 +82,10 @@ def register(tool, get_client) -> None:
         candidate_id: Annotated[int | None, Field(description="Link the task to this candidate.")] = None,
         due: Annotated[
             date | datetime | None,
-            Field(union_mode="left_to_right", description="Due date, or date and time."),
+            Field(
+                union_mode="left_to_right",
+                description="Due date and time. A date alone means 17:00 that day, in the company's timezone.",
+            ),
         ] = None,
         assignee_ids: AdminIds = None,
         description: str | None = None,
@@ -89,6 +93,12 @@ def register(tool, get_client) -> None:
         """Create a to-do for the hiring team, optionally about one candidate. Assignees are notified
         by Recruitee."""
         client = await get_client()
+        # Seen live: Recruitee rejects a bare date, and reads a time without an offset as UTC
+        # whatever `timezone` says. So send an offset-aware datetime in the company's timezone.
+        if due is not None:
+            due = due if isinstance(due, datetime) else datetime.combine(due, time(17))
+            if due.tzinfo is None:
+                due = due.replace(tzinfo=ZoneInfo(client.timezone))
         task = shape.compact(
             {
                 "title": title,

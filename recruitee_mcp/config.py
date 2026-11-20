@@ -27,8 +27,8 @@ def load_settings(env: dict[str, str] | None = None) -> Settings:
     missing = [name for name in REQUIRED if not env.get(name, "").strip()]
     if missing:
         raise ConfigError(
-            "Recruitee is not connected yet. Set these secrets in the foro dashboard and "
-            f"redeploy: {', '.join(missing)}. See the README's setup section."
+            f"Recruitee is not connected yet. Set {', '.join(missing)} in the foro dashboard and "
+            "redeploy, or in the environment when running locally. See the README's setup section."
         )
 
     company_id = env["RECRUITEE_COMPANY_ID"].strip()

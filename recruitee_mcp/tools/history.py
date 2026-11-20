@@ -15,6 +15,7 @@ def register(tool, get_client) -> None:
     ) -> dict:
         """Notes the team wrote on a candidate, newest first, with author and replies."""
         client = await get_client()
+        # Seen live: don't pass offer_id here; it returns the job's own notes, not the candidate's.
         data = await client.get(f"/candidates/{candidate_id}/notes")
         refs = shape.References(data)
         notes = [n for n in data.get("notes") or [] if job_id is None or n.get("offer_id") == job_id]
@@ -59,8 +60,7 @@ def register(tool, get_client) -> None:
         """Email threads with a candidate in Recruitee's mailbox. Read one with get_email_thread."""
         client = await get_client()
         data = await client.get(f"/mailbox/candidate/{candidate_id}")
-        threads = data.get("threads") or data.get("mailbox_threads") if isinstance(data, dict) else data
-        return {"threads": shape.slim(threads if threads is not None else data)}
+        return {"threads": [shape.email_thread(t) for t in data.get("threads") or []]}
 
     @tool()
     async def get_email_thread(
@@ -68,4 +68,5 @@ def register(tool, get_client) -> None:
     ) -> dict:
         """One email thread with every message's sender, recipients, date and text."""
         client = await get_client()
-        return shape.slim(await client.get(f"/mailbox/threads/{thread_id}"))
+        data = await client.get(f"/mailbox/threads/{thread_id}")
+        return shape.email_thread(data.get("thread") or {})
