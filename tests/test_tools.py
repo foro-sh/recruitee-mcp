@@ -482,3 +482,20 @@ async def test_cv_without_a_text_layer_returns_the_link(call, recruitee):
     assert result["cv_url"] == "https://storage.example/scan.pdf"
     assert "scan" in result["note"]
     assert "cv_text" not in result
+
+
+async def test_evaluations_for_a_job_keep_those_linked_to_no_job(call, recruitee):
+    # Seen live: sample evaluations had no offer_id or talent_pool_id at all.
+    recruitee.routes[("GET", "/interview/results")] = {
+        "interview_results": [
+            {"id": 1, "offer_id": 10, "rating": "yes"},
+            {"id": 2, "offer_id": 11, "rating": "no"},
+            {"id": 3, "offer_id": None, "talent_pool_id": None, "rating": "strong_yes"},
+            {"id": 4, "offer_id": None, "talent_pool_id": 20, "rating": "neutral"},
+        ]
+    }
+    recruitee.routes[("GET", "/interview/candidates/5/results/aggregated")] = {"aggregated_results": {}}
+
+    result = await call("get_candidate_evaluations", {"candidate_id": 5, "job_id": 10})
+
+    assert [e["id"] for e in result["evaluations"]] == [1, 3]
