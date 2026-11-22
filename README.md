@@ -107,13 +107,22 @@ uv run python server.py           # streamable HTTP on :8000/mcp
 uv sync
 uv run pytest
 uv run ruff format . && uv run ruff check .
+./smoke.sh   # starts without credentials and lists every tool
 ```
+
+`foro-tools.json` is what foro's blueprint page reads from the latest release: each tool's label and
+whether it changes something, which keeps it off until it is turned on. After adding or changing a
+tool, add its title to `TITLES` in `recruitee_mcp/tools/__init__.py` and run
+`uv run python -m recruitee_mcp.manifest`; a test fails while the file is stale.
+
+Releases are cut by semantic-release from Conventional Commits on `main`.
 
 The layout:
 
 - `recruitee_mcp/client.py`: the HTTP client, with auth, errors and rate-limit handling.
 - `recruitee_mcp/shape.py`: trims Recruitee's large responses down to what an agent reads.
 - `recruitee_mcp/tools/`: one module per area.
+- `recruitee_mcp/manifest.py`: writes `foro-tools.json`.
 - `tests/`: tests against a fake Recruitee.
 
 ## Status: not yet run against a live Recruitee company
