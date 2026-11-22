@@ -1,0 +1,172 @@
+{
+  "tools": [
+    {
+      "name": "list_jobs",
+      "label": "List jobs",
+      "description": "Jobs with status, department, location and candidate counts.",
+      "writes": false
+    },
+    {
+      "name": "get_job",
+      "label": "Get a job",
+      "description": "One job in full: description, requirements, salary, location, team and its pipeline stages.",
+      "writes": false
+    },
+    {
+      "name": "list_pipeline",
+      "label": "Read a job's pipeline",
+      "description": "A job's pipeline: candidates per stage, with when they applied, ratings, overdue flags and upcoming interviews.",
+      "writes": false
+    },
+    {
+      "name": "list_talent_pools",
+      "label": "List talent pools",
+      "description": "Talent pools (candidate lists outside a specific job) with their candidate counts.",
+      "writes": false
+    },
+    {
+      "name": "search_candidates",
+      "label": "Find candidates",
+      "description": "Find candidates by name or email, optionally within one job.",
+      "writes": false
+    },
+    {
+      "name": "filter_candidates",
+      "label": "Filter candidates",
+      "description": "Search all candidates, across every job, by skills, experience, education, languages, tags, sources, rating and dates.",
+      "writes": false
+    },
+    {
+      "name": "get_candidate",
+      "label": "Get a candidate",
+      "description": "One candidate's profile: contact details, every job they're in with stage and status, tags, sources, experience and education, custom fields and screening answers.",
+      "writes": false
+    },
+    {
+      "name": "get_candidate_cv",
+      "label": "Read a candidate's CV",
+      "description": "The plain text of the candidate's CV and their typed cover letter, for reading or comparing candidates.",
+      "writes": false
+    },
+    {
+      "name": "create_candidate",
+      "label": "Add candidates",
+      "description": "Add a candidate, optionally straight into a job or talent pool.",
+      "writes": true
+    },
+    {
+      "name": "update_candidate",
+      "label": "Edit candidates",
+      "description": "Change a candidate's name, headline, emails or phone numbers.",
+      "writes": true
+    },
+    {
+      "name": "list_candidate_notes",
+      "label": "Read notes",
+      "description": "Notes the team wrote on a candidate, newest first, with author and replies.",
+      "writes": false
+    },
+    {
+      "name": "get_candidate_evaluations",
+      "label": "Read evaluations",
+      "description": "Interview scorecards and questionnaires for a candidate: each reviewer's rating, notes and answers, plus Recruitee's overall summary.",
+      "writes": false
+    },
+    {
+      "name": "get_candidate_activity",
+      "label": "Read a candidate's activity",
+      "description": "The candidate's timeline: applications, stage moves, emails, evaluations, notes and other events, newest first.",
+      "writes": false
+    },
+    {
+      "name": "list_candidate_emails",
+      "label": "List emails",
+      "description": "Email threads with a candidate in Recruitee's mailbox.",
+      "writes": false
+    },
+    {
+      "name": "get_email_thread",
+      "label": "Read an email thread",
+      "description": "One email thread with every message's sender, recipients, date and text.",
+      "writes": false
+    },
+    {
+      "name": "add_candidate_to_job",
+      "label": "Add candidates to jobs",
+      "description": "Put an existing candidate into a job's pipeline, or into a talent pool.",
+      "writes": true
+    },
+    {
+      "name": "move_candidate",
+      "label": "Move candidates between stages",
+      "description": "Move a candidate to another stage of a job.",
+      "writes": true
+    },
+    {
+      "name": "disqualify_candidate",
+      "label": "Disqualify candidates",
+      "description": "Disqualify (reject) a candidate in one job.",
+      "writes": true
+    },
+    {
+      "name": "requalify_candidate",
+      "label": "Requalify candidates",
+      "description": "Undo a disqualification: the candidate is back in the job's pipeline, in the same stage.",
+      "writes": true
+    },
+    {
+      "name": "add_note",
+      "label": "Add notes",
+      "description": "Add a note to a candidate's profile, visible to everyone on the team with access.",
+      "writes": true
+    },
+    {
+      "name": "tag_candidate",
+      "label": "Tag candidates",
+      "description": "Add tags to a candidate.",
+      "writes": true
+    },
+    {
+      "name": "untag_candidate",
+      "label": "Remove tags",
+      "description": "Remove tags from a candidate.",
+      "writes": true
+    },
+    {
+      "name": "list_interviews",
+      "label": "List interviews",
+      "description": "Scheduled interviews with candidate, job, time, place or video link, and interviewers.",
+      "writes": false
+    },
+    {
+      "name": "list_tasks",
+      "label": "List tasks",
+      "description": "To-dos for the hiring team, soonest due first.",
+      "writes": false
+    },
+    {
+      "name": "create_task",
+      "label": "Create tasks",
+      "description": "Create a to-do for the hiring team, optionally about one candidate.",
+      "writes": true
+    },
+    {
+      "name": "complete_task",
+      "label": "Complete tasks",
+      "description": "Mark a task done, or reopen it.",
+      "writes": true
+    },
+    {
+      "name": "list_team_members",
+      "label": "List team members",
+      "description": "People on the Recruitee team with their role and whether they recruit or hire.",
+      "writes": false
+    },
+    {
+      "name": "list_reference_data",
+      "label": "Read tags, sources and departments",
+      "description": "The company's tags, candidate sources, departments, locations or disqualify reasons, with IDs for the other tools.",
+      "writes": false
+    }
+  ]
+}
