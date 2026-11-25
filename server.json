@@ -1,0 +1,24 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "sh.foro/recruitee",
+  "title": "Recruitee",
+  "description": "Recruitee hiring: jobs, pipelines, candidates, CVs, notes and interviews. Read-only by default.",
+  "version": "0.0.0",
+  "websiteUrl": "https://docs.foro.sh/recruitee",
+  "repository": {
+    "url": "https://github.com/foro-sh/recruitee-mcp",
+    "source": "github"
+  },
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://{slug}.foro.sh/mcp",
+      "variables": {
+        "slug": {
+          "description": "Your server's slug, shown after you set up the Recruitee blueprint on foro",
+          "isRequired": true
+        }
+      }
+    }
+  ]
+}
