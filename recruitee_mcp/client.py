@@ -86,6 +86,14 @@ class RecruiteeClient:
     async def delete(self, path: str, body: Params | None = None) -> Any:
         return await self.request("DELETE", path, body=body)
 
+    async def download(self, url: str) -> bytes:
+        """A file Recruitee links to, such as a CV on S3. The link is pre-signed, so the API token is
+        not sent along: it must never reach another host."""
+        response = await self._http.get(url)
+        if response.is_error:
+            raise RecruiteeError(f"Could not download the file from Recruitee's storage ({response.status_code}).")
+        return response.content
+
     async def request(self, method: str, path: str, *, params: Params | None = None, body: Params | None = None) -> Any:
         """`path` is relative to the company, e.g. `/candidates/12`."""
         for attempt in range(2):

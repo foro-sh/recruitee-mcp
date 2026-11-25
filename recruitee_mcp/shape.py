@@ -2,8 +2,11 @@
 record plus a `references` list of related records (admins, offers, stages, placements); these
 helpers keep the fields worth reading and put names next to the IDs."""
 
+import io
 from html.parser import HTMLParser
 from typing import Any
+
+import pypdf
 
 _BLOCK_TAGS = {"p", "div", "br", "li", "ul", "ol", "h1", "h2", "h3", "h4", "h5", "h6", "tr", "blockquote"}
 
@@ -25,6 +28,22 @@ class _Text(HTMLParser):
 
     def handle_data(self, data):
         self.parts.append(data)
+
+
+def pdf_text(pdf: bytes) -> str:
+    """The text layer of a PDF, one line per line. Empty for a scan, which has no text layer.
+
+    Layout mode rebuilds lines from word positions: on the sample CVs the default mode put almost
+    every word on its own line.
+    ponytail: no OCR, so scanned CVs come back empty; add it only if scans turn out to be common.
+    ponytail: a two-column CV comes out with both columns on one line; split on wide gaps if that
+    shows up in real CVs."""
+    try:
+        pages = pypdf.PdfReader(io.BytesIO(pdf)).pages
+        raw = "\n".join(page.extract_text(extraction_mode="layout") or "" for page in pages)
+    except Exception:  # A broken or encrypted file shouldn't fail the whole tool call.
+        return ""
+    return "\n".join(" ".join(line.split()) for line in raw.splitlines() if line.strip())
 
 
 def text(html: str | None) -> str | None:
@@ -101,14 +120,24 @@ def placement(p: dict, refs: References | None = None, stages: dict[int, dict] |
         ],
     )
     out["placement_id"] = out.pop("id", None)
-    stage = (stages or {}).get(p.get("stage_id")) or (refs.get("Stage", p.get("stage_id")) if refs else None)
+    # Search hits nest the stage and offer objects instead of giving IDs plus references.
+    nested_stage = p.get("stage") if isinstance(p.get("stage"), dict) else None
+    nested_offer = p.get("offer") if isinstance(p.get("offer"), dict) else None
+    stage = (
+        nested_stage
+        or (stages or {}).get(p.get("stage_id"))
+        or (refs.get("Stage", p.get("stage_id")) if refs else None)
+    )
     if stage:
         out["stage"] = stage.get("name")
-    if refs:
-        offer = refs.get("Offer", p.get("offer_id"))
-        if offer:
-            out["job"] = offer.get("title")
-    if p.get("disqualified_at") or p.get("disqualify_reason_id"):
+    offer = nested_offer or (refs.get("Offer", p.get("offer_id")) if refs else None)
+    if offer and offer.get("kind") == "talent_pool":
+        out["talent_pool_id"] = offer.get("id")
+        out["talent_pool"] = offer.get("title")
+    elif offer:
+        out["offer_id"] = offer.get("id")
+        out["job"] = offer.get("title")
+    if p.get("disqualified_at") or p.get("disqualify_reason_id") or p.get("disqualified"):
         out["disqualified"] = True
     return compact(out)
 
@@ -262,13 +291,13 @@ def evaluation(r: dict, refs: References) -> dict:
     for a in r.get("interview_result_answers") or []:
         if not isinstance(a, dict):
             continue
-        question = a.get("question") if isinstance(a.get("question"), dict) else {}
+        # Seen live: flat question_* keys; rating questions keep per-option scores in `scores`.
         answers.append(
             compact(
                 {
-                    "question": question.get("title") or a.get("title"),
-                    "answer": a.get("content") or text(a.get("content_html")) or a.get("value"),
-                    "score": a.get("score") or a.get("rating"),
+                    "question": a.get("question_title"),
+                    "answer": a.get("content") or text(a.get("content_html")) or a.get("contents"),
+                    "scores": [pick(s, ["title", "score"]) for s in a.get("scores") or []],
                 }
             )
         )
@@ -282,7 +311,8 @@ def evaluation(r: dict, refs: References) -> dict:
             "stage": (refs.get("Stage", r.get("stage_id")) or {}).get("name"),
             "rating": r.get("rating"),
             "score": r.get("score"),
-            "note": r.get("rating_note") or text(r.get("rating_note_html")),
+            # rating_note holds HTML on a live company, despite its name.
+            "note": text(r.get("rating_note_html") or r.get("rating_note")),
             "answers": [a for a in answers if a],
             "created_at": r.get("created_at"),
         }
@@ -290,6 +320,34 @@ def evaluation(r: dict, refs: References) -> dict:
 
 
 _NOISE_SUFFIXES = ("_json", "_thumb_url", "_normal_url", "photo_url")
+
+
+def _people(people: Any) -> list[dict]:
+    return [pick(p, ["name", "email"]) for p in people or [] if isinstance(p, dict)]
+
+
+def email_thread(t: dict) -> dict:
+    """A mailbox thread as seen live: each message carries its body in several HTML variants
+    (safe_html, safe_stripped_html, stripped_html), so only one is kept."""
+    messages = [
+        compact(
+            {
+                "id": m.get("id"),
+                "sent_at": m.get("timestamp"),
+                "from": _people(m.get("from")),
+                "to": _people(m.get("to")),
+                "cc": _people(m.get("cc")),
+                "subject": m.get("subject"),
+                "text": text(m.get("safe_stripped_html") or m.get("stripped_html") or m.get("safe_html"))
+                or m.get("stripped_text")
+                or m.get("text"),
+                "automated": m.get("triggered") or None,
+                "delivery_error": m.get("delivery_error"),
+            }
+        )
+        for m in t.get("messages") or []
+    ]
+    return compact({**pick(t, ["id", "offer_id", "talent_pool_id", "archived_at"]), "messages": messages})
 
 
 def slim(value: Any, depth: int = 0) -> Any:

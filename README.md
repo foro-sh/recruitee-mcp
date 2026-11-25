@@ -17,7 +17,7 @@ up, and anything you switch off is blocked at foro's gate.
 
 | Tool | What it does |
 | --- | --- |
-| `list_jobs` | Jobs by status, department or title, with candidate counts. Defaults to open jobs |
+| `list_jobs` | Jobs by status, department or title. Defaults to open jobs. Counts and location are in `get_job` |
 | `get_job` | One job: description, requirements, salary, location and its pipeline stages |
 | `list_pipeline` | A job's candidates per stage, with ratings, overdue flags and upcoming interviews |
 | `list_talent_pools` | Talent pools with their candidate counts |
@@ -29,7 +29,7 @@ up, and anything you switch off is blocked at foro's gate.
 | `search_candidates` | By name or email, optionally within one job or status |
 | `filter_candidates` | Across all jobs by skills, past titles or companies, degree, languages, tags, sources, rating and dates, plus raw Recruitee filters |
 | `get_candidate` | Profile, every job they're in with stage, tags, sources, experience, education, custom fields, screening answers |
-| `get_candidate_cv` | The CV's plain text and the typed cover letter |
+| `get_candidate_cv` | The CV's plain text and the typed cover letter. When Recruitee hasn't parsed the CV, the text is read from its PDF |
 | `list_candidate_notes` | The team's notes, with author and replies |
 | `get_candidate_evaluations` | Scorecards and questionnaires per reviewer, plus Recruitee's summary score |
 | `get_candidate_activity` | The candidate's timeline |
@@ -49,14 +49,14 @@ up, and anything you switch off is blocked at foro's gate.
 | Tool | What it does | Watch out |
 | --- | --- | --- |
 | `create_candidate` | Adds a candidate, optionally to a job, a talent pool and with tags | Reports possible duplicates |
-| `update_candidate` | Name, headline, emails, phones | Emails and phones replace the whole list |
+| `update_candidate` | Name, emails, phones | Emails and phones replace the whole list |
 | `add_candidate_to_job` | Puts an existing candidate in a job or talent pool | |
 | `move_candidate` | Moves to a stage, given by name or ID | Stage automations (which can email the candidate) only run with `run_automations=true` |
 | `disqualify_candidate` | Rejects in one job with a reason, given by name or ID | The reason's own automations, such as a rejection email, run |
 | `requalify_candidate` | Undoes a disqualification | |
-| `add_note` | Adds a note, optionally filed under a job | Visible to the whole team |
+| `add_note` | Adds a note to the candidate | Visible to the whole team |
 | `tag_candidate` / `untag_candidate` | Adds or removes tags; new names create the tag | |
-| `create_task` / `complete_task` | Creates a to-do, or marks it done or reopens it | Recruitee notifies the assignees |
+| `create_task` / `complete_task` | Creates a to-do, or marks it done or reopens it. A due date alone means 17:00 | Recruitee notifies the assignees |
 
 ### Left out on purpose
 
@@ -95,10 +95,11 @@ missing secrets.
 
 **Run it locally:**
 
+Put the secrets in a `.env` file in the repo (git ignores it), then:
+
 ```sh
 uv sync
-export RECRUITEE_COMPANY_ID=... RECRUITEE_API_TOKEN=...
-uv run python server.py           # streamable HTTP on :8000/mcp
+uv run --env-file .env python server.py   # streamable HTTP on :8000/mcp
 ```
 
 ## Development
@@ -125,32 +126,47 @@ The layout:
 - `recruitee_mcp/manifest.py`: writes `foro-tools.json`.
 - `tests/`: tests against a fake Recruitee.
 
-## Status: not yet run against a live Recruitee company
+## Status: tested against a live Recruitee trial company
 
-The tests run against response shapes from [Recruitee's API reference](https://apidocs.recruitee.com),
-not a real company.
+Every tool was run on a Recruitee trial company with its sample data on 2026-11-20. Where the live
+API differed from the reference, the code follows what was seen, with a "Seen live" comment, and
+the tests use the live shape.
 
-Checked against the reference:
+Confirmed live:
 
-- Every endpoint path and query parameter the tools use.
-- The response keys for candidates, offers, placements, notes, tasks, interview events and results,
-  memberships, tags, sources, departments, locations and disqualify reasons.
-- The search filter groups in `filter_candidates`.
-- The request bodies the reference gives: `{"candidate": {...}}`, `{"note": {"body_json": ...}}`,
-  `{"task": {...}}` and `{"task": {"completed": ...}}`.
+- **Auth.** `Authorization: Bearer <token>` with a personal API token.
+- **Request bodies.** `change_stage`, `disqualify` and `POST /placements` take top-level JSON;
+  a new candidate's `sources` takes names; list parameters are read as `key[]=a&key[]=b`; search
+  takes `filters_json` on GET.
+- **Pipeline.** `/offers/{id}/placements` groups placements per stage (`stages[].placements`), but
+  returns a flat `placements` list when filtered by `stage_id`.
+- **Search hits** nest the `offer` and `stage` objects in each placement.
+- **Evaluations** use flat `question_title` keys, keep rating scores in `scores`, and put HTML in
+  `rating_note`.
+- **Mail threads** carry each body in several HTML variants; the tools keep one.
+- **Task due dates** must include a time, and a time without an offset is read as UTC whatever
+  `timezone` says, so the tool sends an offset-aware time in `RECRUITEE_TIMEZONE`.
+- **Tag endpoints** answer with the tags in the request, not all of the candidate's tags.
+- **CV text.** Recruitee left `cv_text` empty for every sample CV, but `cv_url` always links to a
+  PDF version of the CV, Word files included. When `cv_text` is empty, `get_candidate_cv` downloads
+  that PDF (without the API token) and reads its text layer with pypdf. That worked for all 14
+  sample CVs, in 0.1 to 0.3 seconds each.
 
-Still to check on a test company:
+Found not to work, so left out:
 
-- **Auth.** The `Authorization: Bearer <token>` header. The reference doesn't document auth, so this
-  comes from Recruitee's help centre.
-- **Parameter placement.** Whether `change_stage`, `disqualify` and `POST /placements` take their
-  parameters as a top-level JSON body, as the reference's "URI parameters" suggest.
-- **Note and candidate bodies.** Whether a note accepts `offer_id`, and whether `sources` on a new
-  candidate takes names.
-- **Undocumented response shapes.** The shapes of `/tracking/candidates/{id}/activities`,
-  `/mailbox/candidate/{id}`, `/mailbox/threads/{id}` and the `hits` in candidate search. The tools
-  pass these through a generic trim rather than a fixed shape.
-- **Query format.** Whether list parameters are read as `key[]=a&key[]=b`, and whether search takes
-  `filters_json` on GET as the reference says.
-- **Rate limits.** The reference doesn't document them. The server waits once on a 429, for
-  `Retry-After` or one second, then reports the limit.
+- **Notes per job.** A candidate note can't be filed under a job: `offer_id` inside `note` is
+  ignored, and at the top level of the body it creates a note on the job itself, detached from the
+  candidate. `add_note` has no `job_id`.
+- **Candidate title.** `PATCH /candidates/{id}` answers 422 "Title is invalid" to any `title`.
+
+Still to check:
+
+- **Interviews.** The trial has no interview events, so `list_interviews` has only returned empty.
+- **Scanned and two-column CVs.** A scan has no text layer and there is no OCR, so
+  `get_candidate_cv` returns the signed PDF link (valid about 10 hours) instead. A two-column CV
+  comes out with both columns on one line. Neither showed up in the sample CVs; check how often
+  they occur in real ones.
+- **Rate limits.** Not hit during testing. The server waits once on a 429, for `Retry-After` or one
+  second, then reports the limit.
+- **Talent pool counts.** `/talent_pools` reported `candidates_count: 0` for a pool with candidates.
+  That's Recruitee's own number, passed through as is.

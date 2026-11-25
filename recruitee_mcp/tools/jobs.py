@@ -51,7 +51,7 @@ def register(tool, get_client) -> None:
         limit: Limit = 50,
         page: Page = 1,
     ) -> dict:
-        """Jobs with status, department, location and candidate counts."""
+        """Jobs with status, department and dates. For candidate counts and location, use get_job."""
         client = await get_client()
         data = await client.get(
             "/offers",
@@ -106,7 +106,10 @@ def register(tool, get_client) -> None:
             s["id"]: {**stage_summary(s), "candidates": []} for s in stages if stage_id in (None, s["id"])
         }
         disqualified = []
-        for p in data.get("placements") or []:
+        # Seen live: with stage_id Recruitee answers {"placements": [...]}; without it, the placements
+        # come grouped per stage as {"stages": [{"placements": [...]}]}.
+        placements = data.get("placements") or [p for s in data.get("stages") or [] for p in s.get("placements") or []]
+        for p in placements:
             candidate = p.get("candidate") or {}
             row = shape.compact(
                 {
@@ -115,15 +118,16 @@ def register(tool, get_client) -> None:
                     "placement_id": p.get("id"),
                     "applied_at": p.get("created_at"),
                     "last_activity_at": candidate.get("last_activity_at") or p.get("last_activity_at"),
-                    "positive_ratings": p.get("positive_ratings"),
+                    "positive_ratings": p.get("positive_ratings") or candidate.get("positive_ratings"),
                     "overdue_at": p.get("overdue_at"),
                     "upcoming_interview_at": candidate.get("upcoming_event_starts_at"),
-                    "tags": shape.tag_names(candidate.get("tags") or p.get("tags")),
+                    "tags": candidate.get("tag_names"),
                     "hired_at": p.get("hired_at"),
                 }
             )
-            if p.get("disqualified_at") or p.get("disqualify_reason_id") or p.get("status") == "disqualified":
-                disqualified.append({**row, "stage": by_id.get(p.get("stage_id"), {}).get("name")})
+            if p.get("disqualify_reason"):
+                stage_name = by_id.get(p.get("stage_id"), {}).get("name")
+                disqualified.append({**row, "stage": stage_name, "reason": p["disqualify_reason"]})
                 continue
             column = columns.get(p.get("stage_id"))
             if column is None:
